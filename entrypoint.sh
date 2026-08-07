@@ -78,6 +78,21 @@ echo "-- starting bundled Redis on 127.0.0.1:${REDIS_LOCAL_PORT} --"
 redis-server /home/container/redis.conf --daemonize yes --pidfile /home/container/redis.pid --logfile /home/container/logs/redis.log
 
 # ---------------------------------------------------------------------------
+# TURN (12400 + relay range 12500-12999/udp) and SFU (12399/udp) default to
+# ENABLED in gramsrv itself (internal/config/config.go), and each does a
+# net.ListenUDP on its own port at startup -- if that UDP port isn't actually
+# reachable/allocated on this node, gramsrv's startup FAILS outright, not just
+# the calling feature (private/group calls). A single-allocation Pelican node
+# normally can't open a ~500-port UDP range, so this egg turns both off by
+# default here unless the operator already opted in via the Panel Variables
+# below (TURN_ENABLE / SFU_ENABLE) -- which requires the matching UDP ports to
+# actually be allocated on the node first. See docs/configuration.en.md section
+# 11 in the gramsrv repo for the full port/firewall requirements before
+# enabling either one.
+export TELESRV_TURN_ENABLE="${TELESRV_TURN_ENABLE:-false}"
+export TELESRV_SFU_ENABLE="${TELESRV_SFU_ENABLE:-false}"
+
+# ---------------------------------------------------------------------------
 # Optional admin backend (cmd/telesrv-admin), best-effort.
 # Only starts if the install script managed to build it AND you've opted in.
 # It reads whatever you put in extra.env -- this egg doesn't know its real

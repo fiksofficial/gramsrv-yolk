@@ -1,17 +1,31 @@
 # ----------------------------------
 # Pelican Panel Dockerfile
-# Environment: Go 1.25 + bundled PostgreSQL 16 + Redis (Debian bookworm)
+# Environment: Go 1.25 + bundled PostgreSQL + Redis + ffmpeg (Debian bookworm)
 # Purpose: all-in-one Yolk for gramsrv (telesrv) -- bundles PostgreSQL and
 #          Redis in the SAME container so the egg has no external
 #          dependencies. Used for both the install step and the runtime.
 # Minimum Panel Version: 1.0.0
+#
+# Verified against the actual gramsrv-main source (cmd/telesrv/main.go,
+# internal/config/config.go, docs/configuration.en.md):
+#   - ffmpeg is required for TELESRV_LIVESTREAM_ENABLE=true (default true);
+#     internal/app/livestream/segmenter.go shells out to it directly. Startup
+#     itself never fails without it -- only an actual OBS stream attempt does.
+#   - TURN (12400 + relay range 12500-12999/udp) and SFU (12399/udp) are both
+#     enabled by default and net.ListenUDP on their own ports; if those UDP
+#     ports aren't reachable in this container, START-UP ITSELF FAILS, not
+#     just the calling feature. The entrypoint below disables both by default
+#     (TELESRV_TURN_ENABLE=false, TELESRV_SFU_ENABLE=false) since a typical
+#     single-allocation Pelican node can't usually open a ~500-port UDP range;
+#     an operator who wants voice/video calls can flip them on in extra.env
+#     once those ports are actually allocated on the node.
 # ----------------------------------
 FROM        --platform=$TARGETOS/$TARGETARCH golang:1.25-bookworm
 
 LABEL       org.opencontainers.image.authors="you@example.com" \
             org.opencontainers.image.source="https://github.com/iamxvbaba/gramsrv" \
             org.opencontainers.image.licenses=MIT \
-            org.opencontainers.image.description="All-in-one Yolk for gramsrv (telesrv): Go build toolchain + bundled PostgreSQL + Redis baked into one image, so the egg boots without any external database services."
+            org.opencontainers.image.description="All-in-one Yolk for gramsrv (telesrv): Go build toolchain + bundled PostgreSQL + Redis + ffmpeg baked into one image, so the egg boots without any external database services."
 
 RUN         apt-get update -y \
             && apt-get install -y --no-install-recommends \
@@ -22,6 +36,7 @@ RUN         apt-get update -y \
                 postgresql \
                 postgresql-contrib \
                 redis-server \
+                ffmpeg \
             && PGVER="$(ls /usr/lib/postgresql)" \
             && ln -s /usr/lib/postgresql/${PGVER}/bin/* /usr/local/bin/ \
             && rm -rf /var/lib/apt/lists/*
@@ -30,6 +45,10 @@ RUN         apt-get update -y \
             # that's what makes them survive into the runtime container.
             # The symlink puts initdb/pg_ctl/pg_isready/psql/createdb on
             # PATH regardless of the Debian package's versioned bin dir.
+            # ffmpeg is required by TELESRV_LIVESTREAM_ENABLE (default true) --
+            # see internal/app/livestream/segmenter.go, which shells out to the
+            # binary named by TELESRV_LIVESTREAM_FFMPEG_PATH (default "ffmpeg",
+            # resolved through PATH).
 
 ## Setup user and working directory -- these exact names are required
 RUN         useradd -m -d /home/container -s /bin/bash container
