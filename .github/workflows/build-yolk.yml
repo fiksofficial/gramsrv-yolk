@@ -12,6 +12,9 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,14 +25,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # DOCKERHUB_USERNAME / DOCKERHUB_TOKEN must be added as repo secrets:
-      # Settings -> Secrets and variables -> Actions -> New repository secret.
-      # Never put the actual token value in this file or in chat.
-      - name: Log in to Docker Hub
+      # Uses the token GitHub Actions injects automatically -- no secret to
+      # create or paste anywhere. Publishes to ghcr.io/<owner>/gramsrv-yolk.
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -38,5 +41,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gramsrv-yolk:latest
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gramsrv-yolk:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/gramsrv-yolk:latest
+            ghcr.io/${{ github.repository_owner }}/gramsrv-yolk:${{ github.sha }}
