@@ -37,9 +37,19 @@ if [ ! -s "${PGDATA}/PG_VERSION" ]; then
     mkdir -p "${PGDATA}"
     PWFILE="$(mktemp)"
     echo "${PG_LOCAL_PASSWORD}" > "${PWFILE}"
-    initdb -D "${PGDATA}" -U "${PG_LOCAL_USER}" --pwfile="${PWFILE}" --auth=scram-sha-256 --auth-local=trust >/home/container/logs/pg-initdb.log 2>&1
+    initdb -D "${PGDATA}" -U "${PG_LOCAL_USER}" --pwfile="${PWFILE}" --encoding=UTF8 --locale=C.UTF-8 --auth=scram-sha-256 --auth-local=trust >/home/container/logs/pg-initdb.log 2>&1
     rm -f "${PWFILE}"
 fi
+
+# Debian's postgresql.conf defaults unix_socket_directories to
+# /var/run/postgresql, which doesn't exist (and wouldn't be writable) for
+# the non-root 'container' user -- postgres FATALs on every single boot
+# before ever accepting a connection otherwise. Nothing here needs a Unix
+# socket: every psql/pg_isready/createdb call below connects over TCP
+# (-h 127.0.0.1). Checked unconditionally (not just on first init) so an
+# existing PGDATA from before this fix self-heals on the next boot too.
+grep -q "^unix_socket_directories" "${PGDATA}/postgresql.conf" 2>/dev/null || \
+    echo "unix_socket_directories = ''" >> "${PGDATA}/postgresql.conf"
 
 echo "-- starting bundled PostgreSQL on 127.0.0.1:${PG_LOCAL_PORT} --"
 pg_ctl -D "${PGDATA}" -l /home/container/logs/postgres.log -o "-p ${PG_LOCAL_PORT} -h 127.0.0.1" -w start
