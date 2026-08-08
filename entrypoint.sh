@@ -93,17 +93,45 @@ export TELESRV_TURN_ENABLE="${TELESRV_TURN_ENABLE:-false}"
 export TELESRV_SFU_ENABLE="${TELESRV_SFU_ENABLE:-false}"
 
 # ---------------------------------------------------------------------------
-# Optional admin backend (cmd/telesrv-admin), best-effort.
-# Only starts if the install script managed to build it AND you've opted in.
-# It reads whatever you put in extra.env -- this egg doesn't know its real
-# variable names, so configure it there.
+# Optional admin backend (cmd/telesrv-admin).
+# Verified directly against cmd/telesrv-admin/main.go: it opens its own pgx
+# pool straight at TELESRV_POSTGRES_DSN (reuses the bundled Postgres above,
+# no separate DB needed), and calls telesrv's in-process Admin API for writes
+# -- which telesrv itself only opens when TELESRV_ADMIN_API_ADDR is non-empty
+# (its own default is empty/disabled). loadConfig() in that file hard-fails
+# startup unless AdminUIPassword-or-AdminUIToken, AdminAPIToken, and
+# AdminSessionKey are all set -- mirrored by the checks below so a bad config
+# just skips the feature instead of crash-looping in the background.
 # ---------------------------------------------------------------------------
 if [ "${ENABLE_ADMIN_BACKEND:-false}" = "true" ]; then
-    if [ -x /home/container/gramsrv-admin ]; then
-        echo "-- starting telesrv-admin in background (see extra.env for its settings) --"
-        (./gramsrv-admin > /home/container/logs/admin.log 2>&1 &)
+    mkdir -p /home/container/data
+
+    # telesrv's own Admin API default is empty (disabled) -- must be non-empty
+    # for telesrv-admin to have anything to call.
+    export TELESRV_ADMIN_API_ADDR="${TELESRV_ADMIN_API_ADDR:-127.0.0.1:2599}"
+
+    # Shared bearer secret between telesrv (API) and telesrv-admin (caller) --
+    # opaque to a human, so auto-generate and persist it on first boot unless
+    # you've pinned one yourself via the Panel Variable.
+    if [ -z "${TELESRV_ADMIN_API_TOKEN:-}" ]; then
+        [ -s /home/container/data/.admin_api_token ] || (umask 077 && head -c32 /dev/urandom | base64 | tr -d '\n' > /home/container/data/.admin_api_token)
+        export TELESRV_ADMIN_API_TOKEN="$(cat /home/container/data/.admin_api_token)"
+    fi
+
+    # Signs/encrypts telesrv-admin's session cookies -- also opaque, same
+    # auto-generate-and-persist treatment. Changing it invalidates sessions.
+    if [ -z "${TELESRV_ADMIN_SESSION_KEY:-}" ]; then
+        [ -s /home/container/data/.admin_session_key ] || (umask 077 && head -c32 /dev/urandom | base64 | tr -d '\n' > /home/container/data/.admin_session_key)
+        export TELESRV_ADMIN_SESSION_KEY="$(cat /home/container/data/.admin_session_key)"
+    fi
+
+    if [ ! -x /home/container/gramsrv-admin ]; then
+        echo "-- ENABLE_ADMIN_BACKEND=true but gramsrv-admin wasn't built successfully at install time, skipping --"
+    elif [ -z "${TELESRV_ADMIN_UI_PASSWORD:-}" ] && [ -z "${TELESRV_ADMIN_UI_TOKEN:-}" ]; then
+        echo "-- ENABLE_ADMIN_BACKEND=true but no login credential is set -- fill in 'Admin UI Password', or set TELESRV_ADMIN_UI_TOKEN in extra.env, skipping --"
     else
-        echo "-- ENABLE_ADMIN_BACKEND=true but gramsrv-admin was not built successfully at install time, skipping --"
+        echo "-- starting telesrv-admin on ${TELESRV_ADMIN_UI_ADDR:-127.0.0.1:2600} (telesrv Admin API at ${TELESRV_ADMIN_API_ADDR}) --"
+        (./gramsrv-admin > /home/container/logs/admin.log 2>&1 &)
     fi
 fi
 
