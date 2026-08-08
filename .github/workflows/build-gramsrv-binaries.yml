@@ -1,0 +1,75 @@
+name: Build gramsrv binaries
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      gramsrv_ref:
+        description: "Branch/tag of iamxvbaba/gramsrv to build"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1  # avoid two legs racing to update the same release
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout gramsrv source
+        uses: actions/checkout@v4
+        with:
+          repository: iamxvbaba/gramsrv
+          ref: ${{ github.event.inputs.gramsrv_ref || 'main' }}
+          path: gramsrv
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      # Pure Go cross-compile (CGO_ENABLED=0, already required elsewhere in
+      # this egg) -- no QEMU/emulation needed to produce an arm64 binary
+      # from this amd64 runner.
+      - name: Build telesrv
+        working-directory: gramsrv
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p ../out
+          go build -trimpath -ldflags="-s -w" -o "../out/gramsrv-linux-${{ matrix.goarch }}" ./cmd/telesrv
+
+      - name: Build telesrv-admin (best-effort)
+        working-directory: gramsrv
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -trimpath -ldflags="-s -w" -o "../out/gramsrv-admin-linux-${{ matrix.goarch }}" ./cmd/telesrv-admin \
+            || touch "../out/gramsrv-admin-linux-${{ matrix.goarch }}"
+
+      # Architecture-independent, but each matrix leg is a separate runner
+      # with its own filesystem -- package it in every leg (identical
+      # content each time) rather than trying to share it across jobs.
+      - name: Package seed data
+        run: tar -czf out/data.tar.gz -C gramsrv data
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.event.inputs.gramsrv_ref || 'main' }}
+          name: "gramsrv binaries (${{ github.event.inputs.gramsrv_ref || 'main' }})"
+          prerelease: true
+          make_latest: false
+          files: |
+            out/gramsrv-linux-${{ matrix.goarch }}
+            out/gramsrv-admin-linux-${{ matrix.goarch }}
+            out/data.tar.gz
