@@ -30,6 +30,12 @@ export PGDATA=/home/container/pgdata
 PG_LOCAL_PORT=5432
 PG_LOCAL_USER=telesrv
 PG_LOCAL_PASSWORD=telesrv
+# TCP connections (127.0.0.1) require scram-sha-256 auth since the Unix
+# socket (which had --auth-local=trust) is disabled above. Every psql/
+# createdb call below is libpq-based and reads PGPASSWORD automatically --
+# without this they'd hang/fail on "no password supplied", which is exactly
+# what silently stalled the script here before.
+export PGPASSWORD="${PG_LOCAL_PASSWORD}"
 PG_LOCAL_DB=telesrv
 
 if [ ! -s "${PGDATA}/PG_VERSION" ]; then
