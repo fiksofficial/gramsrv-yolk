@@ -159,4 +159,15 @@ echo "== bundled services ready, launching gramsrv =="
 MODIFIED_STARTUP=`eval echo $(echo ${STARTUP} | sed -e 's/{{/${/g' -e 's/}}/}/g')`
 echo ":/home/container$ ${MODIFIED_STARTUP}"
 
-exec ${MODIFIED_STARTUP}
+# eval (not bare ${MODIFIED_STARTUP}, and NOT `exec ${MODIFIED_STARTUP}`)
+# is required here. Bash only recognizes a leading VAR=value as an env
+# assignment when it's the first word of a freshly-parsed simple command --
+# eval re-parses the resolved string fresh, so that works. Putting `exec`
+# as a literal word before it breaks this: `exec` then becomes the command
+# and the assignment becomes just exec's first argument (a literal string,
+# not env-assignment syntax), which fails with "exec: VAR=value: not
+# found" -- this can't be fixed by wrapping exec in eval too, since the
+# assignment textually comes after exec either way. Dropping exec is fine
+# here: tini -g in the Dockerfile forwards signals to the whole process
+# group, not just a direct child, so stop/restart still works correctly.
+eval "${MODIFIED_STARTUP}"
