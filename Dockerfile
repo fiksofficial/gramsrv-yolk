@@ -32,16 +32,26 @@ RUN         apt-get update -y \
                 git \
                 ca-certificates \
                 curl \
+                gnupg \
                 tini \
-                postgresql \
-                postgresql-contrib \
                 redis-server \
                 ffmpeg \
+            # Debian bookworm's own repo only ships PostgreSQL 15. gramsrv's
+            # baseline migration (deploy/migrations/0001_init.up.sql) is a
+            # pg_dump 17.10 snapshot that SETs transaction_timeout, a GUC
+            # that doesn't exist before PG17 -- applying it against 15 fails
+            # with "unrecognized configuration parameter". Upstream's own
+            # docker-compose.yml confirms: postgres:17-alpine. Add the
+            # official PGDG apt repo to get 17 specifically on Debian.
+            && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+            && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+            && apt-get update -y \
+            && apt-get install -y --no-install-recommends postgresql-17 postgresql-contrib-17 \
             && PGVER="$(ls /usr/lib/postgresql)" \
             && ln -s /usr/lib/postgresql/${PGVER}/bin/* /usr/local/bin/ \
             && rm -rf /var/lib/apt/lists/*
-            # postgresql/postgresql-contrib/redis-server are baked into the
-            # IMAGE itself (not installed by the egg's install script) --
+            # postgresql-17/postgresql-contrib-17/redis-server are baked into
+            # the IMAGE itself (not installed by the egg's install script) --
             # that's what makes them survive into the runtime container.
             # The symlink puts initdb/pg_ctl/pg_isready/psql/createdb on
             # PATH regardless of the Debian package's versioned bin dir.
